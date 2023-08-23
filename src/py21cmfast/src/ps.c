@@ -61,7 +61,9 @@ struct UserParams *user_params_ps;
 struct FlagOptions *flag_options_ps;
 
 //double sigma_norm, R, theta_cmb, omhh, z_equality, y_d, sound_horizon, alpha_nu, f_nu, f_baryon, beta_c, d2fact, R_CUTOFF, DEL_CURR, SIG_CURR;
-double sigma_norm, theta_cmb, omhh, z_equality, y_d, sound_horizon, alpha_nu, f_nu, f_baryon, beta_c, d2fact, R_CUTOFF, DEL_CURR, SIG_CURR;
+double sigma_norm, theta_cmb, omhh, z_equality, y_d, sound_horizon, alpha_nu, f_nu, f_baryon, f_cdm, beta_c, d2fact, R_CUTOFF, DEL_CURR, SIG_CURR;
+
+double k_equality, z_equality, alpha_gamma, alpha_c, beta_c, alpha_b, beta_b, k_silk, sound_horizon, ommh2, ombh2;
 
 float MinMass, mass_bin_width, inv_mass_bin_width;
 
@@ -403,6 +405,10 @@ double dsigma_dk(double k, void *params){
         LOG_ERROR("No such filter: %i. Output is bogus.", global_params.FILTER);
         Throw(ValueError);
     }
+    if(k==0.5*cosmo_params_ps->hlittle){
+        LOG_DEBUG("Transfer @ k=0.5 h/Mpc %lf",T);
+        LOG_DEBUG("PowerSpec @ k=0.5 h/Mpc %lf",p);
+    }
     return k*k*p*w*w;
 }
 double sigma_z0(double M){
@@ -452,56 +458,82 @@ double sigma_z0(double M){
     return sigma_norm * sqrt(result);
 }
 
+// This is the Eisenstein-Hu cdm transfer function without BAO wiggles
+// double TFmdm(double k) {
+//   double gamma_eff = (ommh2 * (alpha_gamma + (1.0 - alpha_gamma) / (1.0 + pow((0.43 * k * sound_horizon), 4.))));
+//   double q = k * pow(theta_cmb, 2) / gamma_eff;
+//   double L = log(2.0 * exp(1.0) + 1.8 * q);
+//   double C0 = 14.2 + 731.0 / (1.0 + 62.5 * q);
+//   double Tc = L / (L + C0 * q * q);
+//   return Tc;
+// }
 
-// FUNCTION TFmdm is the power spectrum transfer function from Eisenstein & Hu ApJ, 1999, 511, 5
-double TFmdm(double k){
-    double q, gamma_eff, q_eff, TF_m, q_nu;
+// This is the Eisenstein-Hu matter (baryons+cdm) transfer function with BAO wiggles
+double TFmdm(double k) {
 
-    q = k*pow(theta_cmb,2)/omhh;
-    gamma_eff=sqrt(alpha_nu) + (1.0-sqrt(alpha_nu))/(1.0+pow(0.43*k*sound_horizon, 4));
-    q_eff = q/gamma_eff;
-    TF_m= log(E+1.84*beta_c*sqrt(alpha_nu)*q_eff);
-    TF_m /= TF_m + pow(q_eff,2) * (14.4 + 325.0/(1.0+60.5*pow(q_eff,1.11)));
-    q_nu = 3.92*q/sqrt(f_nu/N_nu);
-    TF_m *= 1.0 + (1.2*pow(f_nu,0.64)*pow(N_nu,0.3+0.6*f_nu)) /
-    (pow(q_nu,-1.6)+pow(q_nu,0.8));
+  double T_tilde(double k1, double alpha, double beta){
+      double q = k1 / (13.41 * k_equality);
+      double L = log(exp(1.0) + 1.8 * beta * q);
+      double C0 = 14.2 / alpha + 386.0 / (1.0 + 69.9 * pow(q, 1.08));
+      double T0 = L / (L + C0 * q * q);
+      return T0;
+      }
 
-    return TF_m;
+  double f = 1.0 / (1.0 + pow((k * sound_horizon / 5.4),4.));
+  double Tc = f * T_tilde(k, 1.0, beta_c) + (1.0 - f) * T_tilde(k, alpha_c, beta_c);
+
+  double beta_node = 8.41 * pow(ommh2, 0.435);
+  double tilde_s = sound_horizon / pow(1.0 + pow((beta_node / (k * sound_horizon)),3.), 1.0 / 3.0);
+
+  double Tb = ( T_tilde(k, 1.0, 1.0) / (1.0 + pow((k * sound_horizon / 5.2),2.)) + alpha_b / (1.0 + pow((beta_b / (k * sound_horizon)),3.)) * exp(-pow(k / k_silk, 1.4))) * sin(k * tilde_s)/(k*tilde_s) ; 
+    
+  return f_baryon * Tb + f_cdm * Tc;
 }
 
-
 void TFset_parameters(){
-    double z_drag, R_drag, R_equality, p_c, p_cb, f_c, f_cb, f_nub, k_equality;
 
-    LOG_DEBUG("Setting Transfer Function parameters.");
+  LOG_DEBUG("Setting Transfer Function parameters.");
 
-    z_equality = 25000*omhh*pow(theta_cmb, -4) - 1.0;
-    k_equality = 0.0746*omhh/(theta_cmb*theta_cmb);
+      // other input parameters
+  double hubble = cosmo_params_ps->hlittle;
+  double omegam = cosmo_params_ps->OMm;
+  double omegab = cosmo_params_ps->OMb;
+  ommh2 = omegam * hubble * hubble;
+  ombh2 = omegab * hubble * hubble;
+  f_baryon = omegab / omegam;
+  f_cdm = (omegam-omegab)/omegam;
+    
+  k_equality = 7.46e-2 * ommh2 / (theta_cmb*theta_cmb);  // units Mpc^-1
+  z_equality = 2.50e4 * ommh2 / (theta_cmb*theta_cmb*theta_cmb*theta_cmb);
 
-    z_drag = 0.313*pow(omhh,-0.419) * (1 + 0.607*pow(omhh, 0.674));
-    z_drag = 1 + z_drag*pow(cosmo_params_ps->OMb*cosmo_params_ps->hlittle*cosmo_params_ps->hlittle, 0.238*pow(omhh, 0.223));
-    z_drag *= 1291 * pow(omhh, 0.251) / (1 + 0.659*pow(omhh, 0.828));
+  double b1 = 0.313 * pow(ommh2, -0.419) * (1.0 + 0.607 * pow(ommh2, 0.674));
+  double b2 = 0.238 * pow(ommh2, 0.223);
+  double z_d = (1291.0 * pow(ommh2, 0.251) / (1.0 + 0.659 * pow(ommh2, 0.828)) * (1.0 + b1 * pow(ombh2, b2)));
 
-    y_d = (1 + z_equality) / (1.0 + z_drag);
+  double R_d = 31.5 * ombh2 / (theta_cmb*theta_cmb*theta_cmb*theta_cmb) * (1.0e3 / z_d);
+  double R_eq = 31.5 * ombh2 / (theta_cmb*theta_cmb*theta_cmb*theta_cmb) * (1.0e3 / z_equality);
+  sound_horizon = (2.0 / (3.0 * k_equality) * sqrt(6.0 / R_eq) * log((sqrt(1.0 + R_d) + sqrt(R_eq + R_d)) / (1.0 + sqrt(R_eq))));
 
-    R_drag = 31.5 * cosmo_params_ps->OMb*cosmo_params_ps->hlittle*cosmo_params_ps->hlittle * pow(theta_cmb, -4) * 1000 / (1.0 + z_drag);
-    R_equality = 31.5 * cosmo_params_ps->OMb*cosmo_params_ps->hlittle*cosmo_params_ps->hlittle * pow(theta_cmb, -4) * 1000 / (1.0 + z_equality);
+  k_silk = (1.6 * pow(ombh2, 0.52) * pow(ommh2, 0.73) * (1.0 + pow(10.4 * ommh2, -0.95)));
 
-    sound_horizon = 2.0/3.0/k_equality * sqrt(6.0/R_equality) *
-    log( (sqrt(1+R_drag) + sqrt(R_drag+R_equality)) / (1.0 + sqrt(R_equality)) );
+  alpha_gamma = (1.0 - 0.328 * log(431.0 * ommh2) * ombh2 / ommh2 + 0.38 * log(22.3 * ommh2) * pow((omegab / omegam),2.));
+  
 
-    p_c = -(5 - sqrt(1 + 24*(1 - f_nu-f_baryon)))/4.0;
-    p_cb = -(5 - sqrt(1 + 24*(1 - f_nu)))/4.0;
-    f_c = 1 - f_nu - f_baryon;
-    f_cb = 1 - f_nu;
-    f_nub = f_nu+f_baryon;
+  double a1 = pow(46.9 * ommh2, 0.670) * (1.0 + pow(32.1 * ommh2, -0.532));
+  double a2 = pow(12.0 * ommh2, 0.424) * (1.0 + pow(45.0 * ommh2, -0.582));
+  alpha_c = pow(a1, -f_baryon) * pow(a2, -(f_baryon*f_baryon*f_baryon));
+  b1 = 0.944 / (1.0 + pow(458.0 * ommh2, -0.708));
+  b2 = pow(0.395 * ommh2, -0.0266);
+  beta_c = 1.0 + b1 * (pow(f_cdm, b2) - 1.0);
+  beta_c = 1.0 / beta_c;
 
-    alpha_nu = (f_c/f_cb) * (2*(p_c+p_cb)+5)/(4*p_cb+5.0);
-    alpha_nu *= 1 - 0.553*f_nub+0.126*pow(f_nub,3);
-    alpha_nu /= 1-0.193*sqrt(f_nu)+0.169*f_nu;
-    alpha_nu *= pow(1+y_d, p_c-p_cb);
-    alpha_nu *= 1+ (p_cb-p_c)/2.0 * (1.0+1.0/(4.0*p_c+3.0)/(4.0*p_cb+7.0))/(1.0+y_d);
-    beta_c = 1.0/(1.0-0.949*f_nub);
+  double y = (1.0 + z_equality) / (1.0 + z_d);
+  double x = sqrt(1.0 + y);
+  double G_EH98 = y * (-6.0 * x + (2.0 + 3.0 * y) * log((x + 1.0) / (x - 1.0)));
+    
+  alpha_b = 2.07 * k_equality * sound_horizon * pow(1.0 + R_d, -0.75) * G_EH98;
+  beta_b = 0.5 + f_baryon + (3.0 - 2.0 * f_baryon) * sqrt(pow((17.2 * ommh2),2.) + 1.0);
+    
 }
 
 
@@ -651,6 +683,10 @@ double init_ps(){
     LOG_DEBUG("Initialized Power Spectrum.");
 
     sigma_norm = cosmo_params_ps->SIGMA_8/sqrt(result); //takes care of volume factor
+    // LOG_DEBUG("sigma_8^2 @ k=0.5 h/Mpc %lf",log(dsigma_dk(0.5*cosmo_params_ps->hlittle, &Radius_8)));
+    LOG_DEBUG("TF @ k=0.1 %lf",TFmdm(0.1*cosmo_params_ps->hlittle));
+    // LOG_DEBUG("result %lf",sqrt(result));
+    // LOG_DEBUG("sigma %lf",sigma_norm);
     return R_CUTOFF;
 }
 
@@ -1386,11 +1422,11 @@ double Nion_General_MINI(double z, double M_Min, double MassTurnover, double Mas
 /* returns the "effective Jeans mass" in Msun
  corresponding to the gas analog of WDM ; eq. 10 in Barkana+ 2001 */
 double M_J_WDM(){
-    double z_eq, fudge=60;
+    double z_equality, fudge=60;
     if (!(global_params.P_CUTOFF))
         return 0;
-    z_eq = 3600*(cosmo_params_ps->OMm-cosmo_params_ps->OMb)*cosmo_params_ps->hlittle*cosmo_params_ps->hlittle/0.15;
-    return fudge*3.06e8 * (1.5/global_params.g_x) * sqrt((cosmo_params_ps->OMm-cosmo_params_ps->OMb)*cosmo_params_ps->hlittle*cosmo_params_ps->hlittle/0.15) * pow(global_params.M_WDM, -4) * pow(z_eq/3000.0, 1.5);
+    z_equality = 3600*(cosmo_params_ps->OMm-cosmo_params_ps->OMb)*cosmo_params_ps->hlittle*cosmo_params_ps->hlittle/0.15;
+    return fudge*3.06e8 * (1.5/global_params.g_x) * sqrt((cosmo_params_ps->OMm-cosmo_params_ps->OMb)*cosmo_params_ps->hlittle*cosmo_params_ps->hlittle/0.15) * pow(global_params.M_WDM, -4) * pow(z_equality/3000.0, 1.5);
 }
 
 float erfcc(float x)

@@ -4,7 +4,7 @@ dist/
 src/21cmFAST.egg-info/
 
 pip-wheel-metadata/
-
+.ipynb_checkpoints
 \.idea/
 .eggs
 *.pyc
