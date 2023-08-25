@@ -117,7 +117,7 @@ int ComputeInitialConditions(
     float k_x, k_y, k_z, k_mag, p, a, b, k_sq;
     double pixel_deltax;
     float p_vcb, vcb_i;
-
+    float beta;
     float f_pixel_factor;
 
     gsl_rng * r[user_params->N_THREADS];
@@ -204,9 +204,12 @@ int ComputeInitialConditions(
     // ************  END INITIALIZATION ****************** //
     LOG_DEBUG("Finished initialization.");
     // ************ CREATE K-SPACE GAUSSIAN RANDOM FIELD *********** //
-
+    if(cosmo_params->fNL != 0 && user_params_ps->POWER_SPECTRUM != 0){
+    LOG_ERROR("Non-Gaussian Initial Conditions are only implemented with EH power specturm so far...");
+    Throw(0);
+    }
     init_ps();
-
+    beta = 1.5 * cosmo_params->OMm / (2998. * 2998.);
 #pragma omp parallel shared(HIRES_box,r) \
                     private(n_x,n_y,n_z,k_x,k_y,k_z,k_mag,p,a,b,p_vcb) num_threads(user_params->N_THREADS)
     {
@@ -233,8 +236,11 @@ int ComputeInitialConditions(
                     // now get the power spectrum; remember, only the magnitude of k counts (due to issotropy)
                     // this could be used to speed-up later maybe
                     k_mag = sqrt(k_x*k_x + k_y*k_y + k_z*k_z);
-                    p = power_in_k(k_mag);
-
+                    if(cosmo_params->fNL != 0){
+                        p = primpower_in_k(k_mag);
+                        p*= beta*beta;
+                    }
+                    else{p = power_in_k(k_mag);}
                     // ok, now we can draw the values of the real and imaginary part
                     // of our k entry from a Gaussian distribution
                     if(user_params->NO_RNG) {
@@ -263,6 +269,86 @@ int ComputeInitialConditions(
     int stat = dft_c2r_cube(user_params->USE_FFTW_WISDOM, user_params->DIM, D_PARA, user_params->N_THREADS, HIRES_box);
     if(stat>0) Throw(stat);
     LOG_DEBUG("FFT'd hires boxes.");
+
+
+    if(cosmo_params->fNL != 0){
+#pragma omp parallel shared(boxes,HIRES_box) private(i,j,k) num_threads(user_params->N_THREADS)
+        {
+#pragma omp for
+            for (i=0; i<user_params->DIM; i++){
+                for (j=0; j<user_params->DIM; j++){
+                    for (k=0; k<user_params->DIM; k++){
+                        *((float *)HIRES_box + R_FFT_INDEX((unsigned long long)(i),(unsigned long long)(j),(unsigned long long)(k))) += (cosmo_params->fNL) * pow(*((float *)HIRES_box + R_FFT_INDEX((unsigned long long)(i),(unsigned long long)(j),(unsigned long long)(k))),2.)/VOLUME;
+                    }
+                }
+            }
+        }
+        LOG_DEBUG("Added non-Gaussian (squared) part with Fnl = %f",(cosmo_params->fNL));
+        
+#pragma omp parallel shared(HIRES_box) private(i,j,k) num_threads(user_params->N_THREADS)
+        {
+#pragma omp for
+            for (i=0; i<user_params->DIM; i++){
+                for (j=0; j<user_params->DIM; j++){
+                    for (k=0; k<user_params->DIM; k++){
+                        *((float *)HIRES_box + R_FFT_INDEX((unsigned long long)(i),(unsigned long long)(j),(unsigned long long)(k)) ) /= TOT_NUM_PIXELS;
+                    }
+                }
+            }
+        }
+        
+        stat = dft_r2c_cube(user_params->USE_FFTW_WISDOM, user_params->DIM, D_PARA, user_params->N_THREADS, HIRES_box);;
+        if(stat>0) Throw(stat);
+        LOG_DEBUG("FFT'd primordial field to momentum space");
+        
+#pragma omp parallel shared(HIRES_box,r) \
+                    private(n_x,n_y,n_z,k_x,k_y,k_z,k_mag,p,a,b,p_vcb) num_threads(user_params->N_THREADS)
+        {
+#pragma omp for
+            for (n_x=0; n_x<user_params->DIM; n_x++){
+                // convert index to numerical value for this component of the k-mode: k = (2*pi/L) * n
+                if (n_x>MIDDLE)
+                    k_x =(n_x-user_params->DIM) * DELTA_K;  // wrap around for FFT convention
+                else
+                    k_x = n_x * DELTA_K;
+
+                for (n_y=0; n_y<user_params->DIM; n_y++){
+                    // convert index to numerical value for this component of the k-mode: k = (2*pi/L) * n
+                    if (n_y>MIDDLE)
+                        k_y =(n_y-user_params->DIM) * DELTA_K;
+                    else
+                        k_y = n_y * DELTA_K;
+
+                    // since physical space field is real, only half contains independent modes
+                    for (n_z=0; n_z<=MIDDLE; n_z++){
+                        // convert index to numerical value for this component of the k-mode: k = (2*pi/L) * n
+                        k_z = n_z * DELTA_K;
+
+                        // now get the power spectrum; remember, only the magnitude of k counts (due to issotropy)
+                        // this could be used to speed-up later maybe
+                        k_mag = sqrt(k_x*k_x + k_y*k_y + k_z*k_z);
+                        p = transfer_in_k(k_mag); //if Gaussian, apply linear matter power spectrum
+
+
+                        HIRES_box[C_INDEX(n_x, n_y, n_z)] *= p/beta;
+
+                    }
+                }
+            }
+        }
+    LOG_DEBUG("Applied linear transfer function to primordial field");    
+        
+    // *****  Adjust the complex conjugate relations for a real array  ***** //
+    adj_complex_conj(HIRES_box,user_params,cosmo_params);
+
+    memcpy(HIRES_box_saved, HIRES_box, sizeof(fftwf_complex)*KSPACE_NUM_PIXELS);
+
+    // FFT back to real space
+    int stat = dft_c2r_cube(user_params->USE_FFTW_WISDOM, user_params->DIM, D_PARA, user_params->N_THREADS, HIRES_box);
+    if(stat>0) Throw(stat);
+    LOG_DEBUG("FFT'd hires boxes to real space");
+    }
+
 
 #pragma omp parallel shared(boxes,HIRES_box) private(i,j,k) num_threads(user_params->N_THREADS)
     {

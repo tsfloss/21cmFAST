@@ -380,6 +380,7 @@ class CosmoParams(StructWithDefaults):
         "OMm": Planck18.Om0,
         "OMb": Planck18.Ob0,
         "POWER_INDEX": 0.9665,
+        "fNL":0
     }
 
     @property

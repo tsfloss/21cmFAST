@@ -12,7 +12,7 @@ struct CosmoParams{
     float OMl;
     float OMb;
     float POWER_INDEX;
-
+    float fNL;
 };
 
 struct UserParams{

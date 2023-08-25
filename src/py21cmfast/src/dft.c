@@ -77,7 +77,7 @@ int CreateFFTWWisdoms(struct UserParams *user_params, struct CosmoParams *cosmo_
         // allocate array for the k-space and real-space boxes
         fftwf_complex *HIRES_box = (fftwf_complex *) fftwf_malloc(sizeof(fftwf_complex)*KSPACE_NUM_PIXELS);
         fftwf_complex *LOWRES_box = (fftwf_complex *) fftwf_malloc(sizeof(fftwf_complex)*HII_KSPACE_NUM_PIXELS);
-
+        LOG_WARNING("Loading/Computing FFTW WISDOM");
         sprintf(wisdom_filename,"%s/r2c_DIM%d_DIM%d_NTHREADS%d",global_params.wisdoms_path, user_params->DIM,D_PARA,user_params->N_THREADS);
         if(fftwf_import_wisdom_from_filename(wisdom_filename)==0) {
             plan = fftwf_plan_dft_r2c_3d(user_params->DIM, user_params->DIM, D_PARA,

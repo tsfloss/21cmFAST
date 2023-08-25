@@ -323,10 +323,6 @@ double TF_CLASS(double k, int flag_int, int flag_dv)
 
 }
 
-
-
-
-
 // FUNCTION sigma_z0(M)
 // Returns the standard deviation of the normalized, density excess (delta(x)) field,
 // smoothed on the comoving scale of M (see filter definitions for M<->R conversion).
@@ -404,10 +400,6 @@ double dsigma_dk(double k, void *params){
     else {
         LOG_ERROR("No such filter: %i. Output is bogus.", global_params.FILTER);
         Throw(ValueError);
-    }
-    if(k==0.5*cosmo_params_ps->hlittle){
-        LOG_DEBUG("Transfer @ k=0.5 h/Mpc %lf",T);
-        LOG_DEBUG("PowerSpec @ k=0.5 h/Mpc %lf",p);
     }
     return k*k*p*w*w;
 }
@@ -536,6 +528,24 @@ void TFset_parameters(){
     
 }
 
+double primpower_in_k(double k){ 
+    double p;
+    p = pow(k,cosmo_params_ps->POWER_INDEX)/pow(k,4.);
+    return TWOPI*PI*sigma_norm*sigma_norm*p;
+}
+
+double transfer_in_k(double k){ // note the factor of k^2 to make it work easily with the primordial PS
+    double T;
+    
+    if (user_params_ps->POWER_SPECTRUM == 0){
+        T = TFmdm(k);
+        if (global_params.P_CUTOFF) T *= pow(1 + pow(BODE_e*k*R_CUTOFF, 2*BODE_v), -BODE_n/BODE_v);
+    }
+    else if (user_params_ps->POWER_SPECTRUM == 5){
+        T = TF_CLASS(k, 1, 0); //read from z=0 output of CLASS. Note, flag_int = 1 here always, since now we have to have initialized the interpolator for CLASS
+    }
+    return T*k*k;
+}
 
 // Returns the value of the linear power spectrum DENSITY (i.e. <|delta_k|^2>/V)
 // at a given k mode linearly extrapolated to z=0
@@ -588,8 +598,7 @@ double power_in_k(double k){
         LOG_ERROR("No such power spectrum defined: %i. Output is bogus.", user_params_ps->POWER_SPECTRUM);
         Throw(ValueError);
     }
-
-
+    
     return p*TWOPI*PI*sigma_norm*sigma_norm;
 }
 
@@ -614,7 +623,6 @@ double power_in_vcb(double k){
 
     return p*TWOPI*PI*sigma_norm*sigma_norm;
 }
-
 
 double init_ps(){
     double result, error, lower_limit, upper_limit;
@@ -683,10 +691,11 @@ double init_ps(){
     LOG_DEBUG("Initialized Power Spectrum.");
 
     sigma_norm = cosmo_params_ps->SIGMA_8/sqrt(result); //takes care of volume factor
-    // LOG_DEBUG("sigma_8^2 @ k=0.5 h/Mpc %lf",log(dsigma_dk(0.5*cosmo_params_ps->hlittle, &Radius_8)));
-    LOG_DEBUG("TF @ k=0.1 %lf",TFmdm(0.1*cosmo_params_ps->hlittle));
-    // LOG_DEBUG("result %lf",sqrt(result));
-    // LOG_DEBUG("sigma %lf",sigma_norm);
+
+    LOG_DEBUG("TF @ k=0.1 %lf",transfer_in_k(0.1*cosmo_params_ps->hlittle));
+    LOG_DEBUG("sigma_norm %lf",sigma_norm);
+    LOG_DEBUG("Power @ 0.1 %lf",power_in_k(0.1*cosmo_params_ps->hlittle));
+    LOG_DEBUG("PrimPower @ 0.1 %lf",primpower_in_k(0.1*cosmo_params_ps->hlittle));
     return R_CUTOFF;
 }
 
