@@ -38,8 +38,6 @@
 #include "FindHaloes.c"
 #include "PerturbHaloField.c"
 
-
-
 void adj_complex_conj(fftwf_complex *HIRES_box, struct UserParams *user_params, struct CosmoParams *cosmo_params){
     /*****  Adjust the complex conjugate relations for a real array  *****/
 
@@ -263,15 +261,15 @@ int ComputeInitialConditions(
     // *****  Adjust the complex conjugate relations for a real array  ***** //
     adj_complex_conj(HIRES_box,user_params,cosmo_params);
 
-    memcpy(HIRES_box_saved, HIRES_box, sizeof(fftwf_complex)*KSPACE_NUM_PIXELS);
-
-    // FFT back to real space
-    int stat = dft_c2r_cube(user_params->USE_FFTW_WISDOM, user_params->DIM, D_PARA, user_params->N_THREADS, HIRES_box);
-    if(stat>0) Throw(stat);
-    LOG_DEBUG("FFT'd hires boxes.");
-
+    int stat;
 
     if(cosmo_params->fNL != 0){
+        
+        stat = dft_c2r_cube(user_params->USE_FFTW_WISDOM, user_params->DIM, D_PARA, user_params->N_THREADS, HIRES_box);
+        if(stat>0) Throw(stat);
+        LOG_DEBUG("FFT'd hires boxes to real space for pnG");
+
+        
 #pragma omp parallel shared(boxes,HIRES_box) private(i,j,k) num_threads(user_params->N_THREADS)
         {
 #pragma omp for
@@ -285,19 +283,7 @@ int ComputeInitialConditions(
         }
         LOG_DEBUG("Added non-Gaussian (squared) part with Fnl = %f",(cosmo_params->fNL));
         
-#pragma omp parallel shared(HIRES_box) private(i,j,k) num_threads(user_params->N_THREADS)
-        {
-#pragma omp for
-            for (i=0; i<user_params->DIM; i++){
-                for (j=0; j<user_params->DIM; j++){
-                    for (k=0; k<user_params->DIM; k++){
-                        *((float *)HIRES_box + R_FFT_INDEX((unsigned long long)(i),(unsigned long long)(j),(unsigned long long)(k)) ) /= TOT_NUM_PIXELS;
-                    }
-                }
-            }
-        }
-        
-        stat = dft_r2c_cube(user_params->USE_FFTW_WISDOM, user_params->DIM, D_PARA, user_params->N_THREADS, HIRES_box);;
+        stat = dft_r2c_cube(user_params->USE_FFTW_WISDOM, user_params->DIM, D_PARA, user_params->N_THREADS, HIRES_box);
         if(stat>0) Throw(stat);
         LOG_DEBUG("FFT'd primordial field to momentum space");
         
@@ -329,8 +315,7 @@ int ComputeInitialConditions(
                         k_mag = sqrt(k_x*k_x + k_y*k_y + k_z*k_z);
                         p = transfer_in_k(k_mag); //if Gaussian, apply linear matter power spectrum
 
-
-                        HIRES_box[C_INDEX(n_x, n_y, n_z)] *= p/beta;
+                        HIRES_box[C_INDEX(n_x, n_y, n_z)] *= p/beta/TOT_NUM_PIXELS;
 
                     }
                 }
@@ -340,15 +325,14 @@ int ComputeInitialConditions(
         
     // *****  Adjust the complex conjugate relations for a real array  ***** //
     adj_complex_conj(HIRES_box,user_params,cosmo_params);
-
-    memcpy(HIRES_box_saved, HIRES_box, sizeof(fftwf_complex)*KSPACE_NUM_PIXELS);
-
-    // FFT back to real space
-    int stat = dft_c2r_cube(user_params->USE_FFTW_WISDOM, user_params->DIM, D_PARA, user_params->N_THREADS, HIRES_box);
-    if(stat>0) Throw(stat);
-    LOG_DEBUG("FFT'd hires boxes to real space");
     }
 
+memcpy(HIRES_box_saved, HIRES_box, sizeof(fftwf_complex)*KSPACE_NUM_PIXELS);
+
+// FFT back to real space
+stat = dft_c2r_cube(user_params->USE_FFTW_WISDOM, user_params->DIM, D_PARA, user_params->N_THREADS, HIRES_box);
+if(stat>0) Throw(stat);
+LOG_DEBUG("FFT'd hires boxes to real space");
 
 #pragma omp parallel shared(boxes,HIRES_box) private(i,j,k) num_threads(user_params->N_THREADS)
     {
@@ -482,9 +466,9 @@ int ComputeInitialConditions(
             }
         }
     }
-
-  }
     LOG_DEBUG("Completed Relative velocities.");
+  }
+
     // ******* End of Relative Velocity part ******* //
 
 
@@ -953,9 +937,9 @@ int ComputeInitialConditions(
 
         // deallocate the supplementary boxes
         fftwf_free(phi_1);
-
-    }
     LOG_DEBUG("Done 2LPT.");
+    }
+
 
     // * *********************************************** * //
     // *               END 2LPT PART                     * //
