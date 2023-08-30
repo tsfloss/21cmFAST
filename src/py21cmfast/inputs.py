@@ -483,7 +483,7 @@ class UserParams(StructWithDefaults):
     }
 
     _hmf_models = ["PS", "ST", "WATSON", "WATSON-Z"]
-    _power_models = ["EH", "BBKS", "EFSTATHIOU", "PEEBLES", "WHITE", "CLASS"]
+    _power_models = ["EH", "BBKS", "EFSTATHIOU", "PEEBLES", "WHITE", "CLASS","EH_WIGGLE"]
 
     @property
     def USE_INTERPOLATION_TABLES(self):

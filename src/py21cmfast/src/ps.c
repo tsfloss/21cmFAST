@@ -196,6 +196,7 @@ void free_ps(); /* deallocates the gsl structures from init_ps */
 double sigma_z0(double M); //calculates sigma at z=0 (no dicke)
 double power_in_k(double k); /* Returns the value of the linear power spectrum density (i.e. <|delta_k|^2>/V) at a given k mode at z=0 */
 double TFmdm(double k); //Eisenstein & Hu power spectrum transfer function
+double TFmdm_wiggle(double k); //Eisenstein & Hu power spectrum transfer function, with wiggle
 void TFset_parameters();
 
 double TF_CLASS(double k, int flag_int, int flag_dv); //transfer function of matter (flag_dv=0) and relative velocities (flag_dv=1) fluctuations from CLASS
@@ -340,7 +341,7 @@ double dsigma_dk(double k, void *params){
     double p, w, T, gamma, q, aa, bb, cc, kR;
 
     // get the power spectrum.. choice of 5:
-    if (user_params_ps->POWER_SPECTRUM == 0){ // Eisenstein & Hu
+    if (user_params_ps->POWER_SPECTRUM == 0){ // Eisenstein & Hu, without Wiggle
         T = TFmdm(k);
         // check if we should cuttoff power spectrum according to Bode et al. 2000 transfer function
         if (global_params.P_CUTOFF) T *= pow(1 + pow(BODE_e*k*R_CUTOFF, 2*BODE_v), -BODE_n/BODE_v);
@@ -379,6 +380,12 @@ double dsigma_dk(double k, void *params){
         if(user_params_ps->USE_RELATIVE_VELOCITIES) { //jbm:Add average relvel suppression
           p *= 1.0 - A_VCB_PM*exp( -pow(log(k/KP_VCB_PM),2.0)/(2.0*SIGMAK_VCB_PM*SIGMAK_VCB_PM)); //for v=vrms
         }
+    }
+    else if (user_params_ps->POWER_SPECTRUM == 6){ // Eisenstein & Hu, with Wiggle
+        T = TFmdm_wiggle(k);
+        // check if we should cuttoff power spectrum according to Bode et al. 2000 transfer function
+        if (global_params.P_CUTOFF) T *= pow(1 + pow(BODE_e*k*R_CUTOFF, 2*BODE_v), -BODE_n/BODE_v);
+        p = pow(k, cosmo_params_ps->POWER_INDEX) * T * T;
     }
     else{
         LOG_ERROR("No such power spectrum defined: %i. Output is bogus.", user_params_ps->POWER_SPECTRUM);
@@ -450,18 +457,18 @@ double sigma_z0(double M){
     return sigma_norm * sqrt(result);
 }
 
-// This is the Eisenstein-Hu cdm transfer function without BAO wiggles
-// double TFmdm(double k) {
-//   double gamma_eff = (ommh2 * (alpha_gamma + (1.0 - alpha_gamma) / (1.0 + pow((0.43 * k * sound_horizon), 4.))));
-//   double q = k * pow(theta_cmb, 2) / gamma_eff;
-//   double L = log(2.0 * exp(1.0) + 1.8 * q);
-//   double C0 = 14.2 + 731.0 / (1.0 + 62.5 * q);
-//   double Tc = L / (L + C0 * q * q);
-//   return Tc;
-// }
-
-// This is the Eisenstein-Hu matter (baryons+cdm) transfer function with BAO wiggles
+// This is the Eisenstein-Hu cdm transfer function without BAO wiggles, eq 28-31 of astro-ph/9709112v1
 double TFmdm(double k) {
+  double gamma_eff = (ommh2 * (alpha_gamma + (1.0 - alpha_gamma) / (1.0 + pow((0.43 * k * sound_horizon), 4.))));
+  double q = k * pow(theta_cmb, 2) / gamma_eff;
+  double L = log(2.0 * exp(1.0) + 1.8 * q);
+  double C0 = 14.2 + 731.0 / (1.0 + 62.5 * q);
+  double Tc = L / (L + C0 * q * q);
+  return Tc;
+}
+
+// This is the Eisenstein-Hu matter (baryons+cdm) transfer function with BAO wiggles, eq 8-15 of astro-ph/9709112v1
+double TFmdm_wiggle(double k) {
 
   double T_tilde(double k1, double alpha, double beta){
       double q = k1 / (13.41 * k_equality);
@@ -541,6 +548,10 @@ double transfer_in_k(double k){ // note the factor of k^2 to make it work easily
         T = TFmdm(k);
         if (global_params.P_CUTOFF) T *= pow(1 + pow(BODE_e*k*R_CUTOFF, 2*BODE_v), -BODE_n/BODE_v);
     }
+    else if (user_params_ps->POWER_SPECTRUM == 6){
+        T = TFmdm_wiggle(k);
+        if (global_params.P_CUTOFF) T *= pow(1 + pow(BODE_e*k*R_CUTOFF, 2*BODE_v), -BODE_n/BODE_v);
+    }
     else if (user_params_ps->POWER_SPECTRUM == 5){
         T = TF_CLASS(k, 1, 0); //read from z=0 output of CLASS. Note, flag_int = 1 here always, since now we have to have initialized the interpolator for CLASS
     }
@@ -553,7 +564,7 @@ double power_in_k(double k){
     double p, T, gamma, q, aa, bb, cc;
 
     // get the power spectrum.. choice of 5:
-    if (user_params_ps->POWER_SPECTRUM == 0){ // Eisenstein & Hu
+    if (user_params_ps->POWER_SPECTRUM == 0){ // Eisenstein & Hu, no wiggle
         T = TFmdm(k);
         // check if we should cuttoff power spectrum according to Bode et al. 2000 transfer function
         if (global_params.P_CUTOFF) T *= pow(1 + pow(BODE_e*k*R_CUTOFF, 2*BODE_v), -BODE_n/BODE_v);
@@ -593,6 +604,13 @@ double power_in_k(double k){
         if(user_params_ps->USE_RELATIVE_VELOCITIES) { //jbm:Add average relvel suppression
           p *= 1.0 - A_VCB_PM*exp( -pow(log(k/KP_VCB_PM),2.0)/(2.0*SIGMAK_VCB_PM*SIGMAK_VCB_PM)); //for v=vrms
         }
+    }
+    else if (user_params_ps->POWER_SPECTRUM == 6){ // Eisenstein & Hu, with wiggle
+        T = TFmdm_wiggle(k);
+        // check if we should cuttoff power spectrum according to Bode et al. 2000 transfer function
+        if (global_params.P_CUTOFF) T *= pow(1 + pow(BODE_e*k*R_CUTOFF, 2*BODE_v), -BODE_n/BODE_v);
+        p = pow(k, cosmo_params_ps->POWER_INDEX) * T * T;
+        //p = pow(k, POWER_INDEX - 0.05*log(k/0.05)) * T * T; //running, alpha=0.05
     }
     else{
         LOG_ERROR("No such power spectrum defined: %i. Output is bogus.", user_params_ps->POWER_SPECTRUM);
@@ -723,7 +741,7 @@ double dsigmasq_dm(double k, void *params){
     double p, w, T, gamma, q, aa, bb, cc, dwdr, drdm, kR;
 
     // get the power spectrum.. choice of 5:
-    if (user_params_ps->POWER_SPECTRUM == 0){ // Eisenstein & Hu ApJ, 1999, 511, 5
+    if (user_params_ps->POWER_SPECTRUM == 0){ // Eisenstein & Hu, no wiggle
         T = TFmdm(k);
         // check if we should cuttoff power spectrum according to Bode et al. 2000 transfer function
         if (global_params.P_CUTOFF) T *= pow(1 + pow(BODE_e*k*R_CUTOFF, 2*BODE_v), -BODE_n/BODE_v);
@@ -764,6 +782,13 @@ double dsigmasq_dm(double k, void *params){
           p *= 1.0 - A_VCB_PM*exp( -pow(log(k/KP_VCB_PM),2.0)/(2.0*SIGMAK_VCB_PM*SIGMAK_VCB_PM)); //for v=vrms
         }
       }
+    else if (user_params_ps->POWER_SPECTRUM == 6){ // Eisenstein & Hu ApJ, with wiggle
+        T = TFmdm_wiggle(k);
+        // check if we should cuttoff power spectrum according to Bode et al. 2000 transfer function
+        if (global_params.P_CUTOFF) T *= pow(1 + pow(BODE_e*k*R_CUTOFF, 2*BODE_v), -BODE_n/BODE_v);
+        p = pow(k, cosmo_params_ps->POWER_INDEX) * T * T;
+        //p = pow(k, POWER_INDEX - 0.05*log(k/0.05)) * T * T; //running, alpha=0.05
+    }
     else{
         LOG_ERROR("No such power spectrum defined: %i. Output is bogus.", user_params_ps->POWER_SPECTRUM);
         Throw(ValueError);
